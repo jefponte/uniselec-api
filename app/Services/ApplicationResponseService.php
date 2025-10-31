@@ -58,25 +58,31 @@ class ApplicationResponseService
             $cla = ConvocationListApplication::lockForUpdate()->findOrFail($claId);
 
             if ($cla->convocation_status !== 'called' || $cla->response_status !== 'pending') {
-                throw new InvalidArgumentException("Só é possível recusar candidaturas em status called e response pending.");
+                throw new InvalidArgumentException(
+                    "Só é possível recusar candidaturas em status 'called' e response 'pending'."
+                );
             }
 
-            // libera a vaga novamente
+            // 1) libera a vaga associada
             if ($cla->seat_id) {
-                $seat = ConvocationListSeat::lockForUpdate()->find($cla->seat_id);
-                $seat->status = 'open';
+                $seat = ConvocationListSeat::lockForUpdate()->findOrFail($cla->seat_id);
+                $seat->status         = 'open';
                 $seat->application_id = null;
                 $seat->save();
             }
 
-            // atualiza o response_status
-            $cla->response_status = 'declined';
+            // 2) atualiza esta convocação
+            $cla->response_status    = 'declined';
+            $cla->convocation_status = 'skipped';
             $cla->save();
 
-            // nas outras convocações desta mesma application, marca declined_other_list
+            // 3) atualiza todas as outras convocações da mesma inscrição
             ConvocationListApplication::where('application_id', $cla->application_id)
                 ->where('id', '<>', $cla->id)
-                ->update(['response_status' => 'declined_other_list']);
+                ->update([
+                    'response_status'    => 'declined_other_list',
+                    'convocation_status' => 'skipped',
+                ]);
         });
     }
 
