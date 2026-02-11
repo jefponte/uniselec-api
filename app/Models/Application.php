@@ -17,7 +17,10 @@ class Application extends Model
         'user_id',
         'form_data',
         'process_selection_id',
-        'verification_code'
+        'verification_code',
+        "name_source",
+        "birthdate_source",
+        "cpf_source",
     ];
 
     protected $casts = [
@@ -40,5 +43,10 @@ class Application extends Model
     public function enemScore()
     {
         return $this->hasOne(EnemScore::class, 'application_id', 'id');
+    }
+
+    public function appeal()
+    {
+        return $this->hasOne(Appeal::class);
     }
 }

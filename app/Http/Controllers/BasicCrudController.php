@@ -82,6 +82,13 @@ abstract class BasicCrudController extends Controller
 
         $validator = Validator::make($request->all(), $rules);
 
+        if ($validator->fails()) {
+            // Retorna os erros como JSON
+            return response()->json([
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
         $validatedData = $validator->validate();
 
         $obj->update($validatedData);

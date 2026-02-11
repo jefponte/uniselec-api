@@ -7,6 +7,7 @@ use App\Models\ApplicationOutcome;
 use App\Models\EnemScore;
 use App\Models\KnowledgeArea;
 use App\Models\ProcessSelection;
+use Carbon\Carbon;
 
 class ProcessApplicationOutcome
 {
@@ -17,11 +18,10 @@ class ProcessApplicationOutcome
         $this->ensureAllApplicationsHaveOutcomes();
         $this->processEnemScores();
         $this->markDuplicateApplications();
+        ProcessSelection::find($this->processSelectionId)
+            ->update(['last_applications_processed_at' => Carbon::now()]);
     }
 
-    /* ---------------------------------------------------------------------- */
-    /* ----------------------   1) OUTCOME PLACEHOLDERS   -------------------- */
-    /* ---------------------------------------------------------------------- */
 
     private function ensureAllApplicationsHaveOutcomes(): void
     {
@@ -42,9 +42,6 @@ class ProcessApplicationOutcome
             );
     }
 
-    /* ---------------------------------------------------------------------- */
-    /* ----------------------   2) PROCESSAMENTO ENEM    --------------------- */
-    /* ---------------------------------------------------------------------- */
 
     private function processEnemScores(): void
     {
@@ -89,25 +86,27 @@ class ProcessApplicationOutcome
             /* --- consistências -------------------------------------------- */
             $reasons = [];
 
-            if (($enemScore->scores['cpf'] ?? '') !== ($applicationData['cpf'] ?? '')) {
+            if ((($enemScore->scores['cpf'] ?? '') !== ($applicationData['cpf'] ?? '')) && !$application->cpf_source) {
                 $reasons[] = 'Inconsistência no CPF';
             }
 
-            if ($this->normalizeString($enemScore->scores['name'] ?? '') !==
-                $this->normalizeString($applicationData['name'] ?? '')) {
+            if (($this->normalizeString($enemScore->scores['name'] ?? '') !==
+                $this->normalizeString($applicationData['name'] ?? '') && !$application->name_source)) {
                 $reasons[] = 'Inconsistência no Nome';
             }
 
             $birthdateInconsistency = false;
-            if (($applicationData['birthdate'] ?? null) && ($enemScore->scores['birthdate'] ?? null)) {
-                $appDate  = \DateTime::createFromFormat('Y-m-d', $applicationData['birthdate']);
-                $enemDate = \DateTime::createFromFormat('d/m/Y', $enemScore->scores['birthdate']);
-                if (!$appDate || !$enemDate || $appDate->format('Y-m-d') !== $enemDate->format('Y-m-d')) {
-                    $reasons[] = 'Inconsistência na Data de Nascimento';
-                    $birthdateInconsistency = true;
+            if (!$application->name_source) {
+                if (($applicationData['birthdate'] ?? null) && ($enemScore->scores['birthdate'] ?? null)) {
+                    $appDate  = \DateTime::createFromFormat('Y-m-d', $applicationData['birthdate']);
+                    $enemDate = \DateTime::createFromFormat('d/m/Y', $enemScore->scores['birthdate']);
+                    if (!$appDate || !$enemDate || $appDate->format('Y-m-d') !== $enemDate->format('Y-m-d')) {
+                        $reasons[] = 'Inconsistência na Data de Nascimento';
+                        $birthdateInconsistency = true;
+                    }
+                } else {
+                    $reasons[] = 'Data de Nascimento ausente ou inconsistente';
                 }
-            } else {
-                $reasons[] = 'Data de Nascimento ausente ou inconsistente';
             }
 
             /* --- análise da nota mínima ------------------------------ */
@@ -131,7 +130,7 @@ class ProcessApplicationOutcome
 
             // Verifica se houve ao menos uma reprovação por nota mínima
             if ($rejectedByMinimumScore = count($failedScoreNames) > 0) {
-                
+
                 // Transforma os slugs das áreas reprovadas em suas descrições legíveis
                 $failedDescriptions = collect($failedScoreNames)
                 ->map(fn ($key) => $knowledgeArea->firstWhere('slug', $key)->name)
@@ -149,7 +148,7 @@ class ProcessApplicationOutcome
             if ($rejectedByMinimumScore || (count($reasons) === 3)) {
                 $status = 'rejected';
             } elseif (count($reasons) === 1 && $birthdateInconsistency) {
-                $status = 'approved';
+                $status = 'pending';
             } elseif (!empty($reasons)) {
                 $status = 'pending';
             } else {
